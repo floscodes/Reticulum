@@ -87,6 +87,7 @@ class MeshtasticFrameCodec:
 class MeshtasticInterface(Interface):
     """A bidirectional binary Reticulum interface over Meshtastic."""
 
+    DEFAULT_IFAC_SIZE = 8
     DEFAULT_BITRATE = 118
     DEFAULT_PAYLOAD_SIZE = 233
     DEFAULT_REASSEMBLY_TIMEOUT = 300
@@ -106,6 +107,10 @@ class MeshtasticInterface(Interface):
         self.hop_limit = c.as_int("hop_limit") if "hop_limit" in c else None
         self.bitrate = c.as_int("bitrate") if "bitrate" in c else self.DEFAULT_BITRATE
         self.HW_MTU = 500
+        # Reticulum only forwards outbound packets to interfaces explicitly
+        # marked as outgoing. This interface carries traffic in both directions.
+        self.IN = True
+        self.OUT = True
         self.online = False
         self.detached = False
         self.fragments = {}

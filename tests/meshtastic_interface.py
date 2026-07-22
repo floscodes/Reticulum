@@ -1,9 +1,12 @@
 import unittest
 
-from RNS.Interfaces.MeshtasticInterface import MeshtasticFrameCodec
+from RNS.Interfaces.MeshtasticInterface import MeshtasticFrameCodec, MeshtasticInterface
 
 
 class MeshtasticFrameCodecTest(unittest.TestCase):
+    def test_reticulum_interface_defaults(self):
+        self.assertEqual(MeshtasticInterface.DEFAULT_IFAC_SIZE, 8)
+
     def test_binary_round_trip_multiframe(self):
         packet = bytes(range(256)) + bytes(range(244))
         frames = MeshtasticFrameCodec.encode(packet, payload_size=80)
