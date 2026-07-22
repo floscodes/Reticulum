@@ -784,23 +784,21 @@ Reticulum will try to respawn the program after waiting for `respawn_interval` s
 
 ## Meshtastic Interface
 
-The Meshtastic interface carries Reticulum packets through the official
-`meshtastic` CLI. Install it first with `pip3 install --upgrade "meshtastic[cli]"`.
-The CLI owns the Meshtastic device connection; Reticulum does not import or use
-the Meshtastic Python API directly.
+The Meshtastic interface uses the official `meshtastic` Python library directly.
+Install Reticulum with the optional dependency: `pip install "rns[meshtastic]"`.
 
-RNS packets are URL-safe-base64 encoded and fragmented into Meshtastic text
-messages. Consequently this is a low-bandwidth transport: use a dedicated
-Meshtastic channel and conservative airtime settings. The receiver runs
-`meshtastic --listen`; it needs a current CLI version whose debug listener output
-includes received text messages.
+RNS packets are sent as binary Meshtastic data on `RETICULUM_TUNNEL_APP`, not as
+text messages. The interface fragments only packets larger than Meshtastic's
+233-byte application payload limit. Use a dedicated Meshtastic channel and
+conservative airtime settings.
 
 ```ini
 [[Meshtastic]]
   type = MeshtasticInterface
   enabled = yes
 
-  # Select exactly one connection method. Omitting all lets the CLI discover one.
+  # Select exactly one connection method. Omitting all lets the library discover
+  # a serial device automatically.
   port = /dev/ttyUSB0
   # host = meshtastic.local
   # ble = device_name_or_address
@@ -809,12 +807,11 @@ includes received text messages.
   channel = 0
   # destination = !12345678
 
-  # Optional CLI executable/path and extra CLI arguments.
-  # cli_command = meshtastic
-  # cli_args = --timeout,30
-
-  # Max characters per Meshtastic text message (default 200; must be >= 48).
-  # message_size = 200
+  # Maximum Meshtastic application payload, normally 233 bytes.
+  # payload_size = 233
+  # connection_timeout = 30
+  # want_ack = no
+  # hop_limit = 3
   # bitrate = 118
 ```
 
