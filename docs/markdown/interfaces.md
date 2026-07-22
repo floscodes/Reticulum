@@ -782,6 +782,42 @@ Reticulum will write all packets to stdin of the `command` option, and will
 continuously read and scan its stdout for Reticulum packets. If `EOF` is reached,
 Reticulum will try to respawn the program after waiting for `respawn_interval` seconds.
 
+## Meshtastic Interface
+
+The Meshtastic interface carries Reticulum packets through the official
+`meshtastic` CLI. Install it first with `pip3 install --upgrade "meshtastic[cli]"`.
+The CLI owns the Meshtastic device connection; Reticulum does not import or use
+the Meshtastic Python API directly.
+
+RNS packets are URL-safe-base64 encoded and fragmented into Meshtastic text
+messages. Consequently this is a low-bandwidth transport: use a dedicated
+Meshtastic channel and conservative airtime settings. The receiver runs
+`meshtastic --listen`; it needs a current CLI version whose debug listener output
+includes received text messages.
+
+```ini
+[[Meshtastic]]
+  type = MeshtasticInterface
+  enabled = yes
+
+  # Select exactly one connection method. Omitting all lets the CLI discover one.
+  port = /dev/ttyUSB0
+  # host = meshtastic.local
+  # ble = device_name_or_address
+
+  # Meshtastic channel index and optional unicast destination.
+  channel = 0
+  # destination = !12345678
+
+  # Optional CLI executable/path and extra CLI arguments.
+  # cli_command = meshtastic
+  # cli_args = --timeout,30
+
+  # Max characters per Meshtastic text message (default 200; must be >= 48).
+  # message_size = 200
+  # bitrate = 118
+```
+
 ## KISS Interface
 
 With the KISS interface, you can use Reticulum over a variety of packet

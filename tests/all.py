@@ -5,6 +5,7 @@ from .hashes import TestSHA512
 from .identity import TestIdentity
 from .link import TestLink
 from .channel import TestChannel
+from .meshtastic_interface import MeshtasticFrameCodecTest
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
