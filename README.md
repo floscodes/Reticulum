@@ -3,7 +3,22 @@ Reticulum Network Stack <img align="right" src="https://static.pepy.tech/persona
 
 <p align="center"><img width="200" src="https://raw.githubusercontent.com/markqvist/Reticulum/master/docs/source/graphics/rns_logo_512.png"></p>
 
-*This repository is [a public mirror](./MIRROR.md). All development is happening elsewhere.*
+> [!IMPORTANT]
+> This repository is an independent, community-maintained fork of
+> [Reticulum](https://github.com/markqvist/Reticulum). Reticulum was created
+> and is primarily developed by Mark Qvist. This fork is not an official
+> Reticulum distribution, and no support or review from the original author
+> is expected.
+
+**Additions maintained in this fork**
+
+This fork aims to preserve Reticulum compatibility and ease of use while
+maintaining selected integrations. It currently adds a native
+[`MeshtasticInterface`](./docs/markdown/interfaces.md#meshtastic-interface)
+for transporting Reticulum traffic over Meshtastic radios. The interface uses
+Meshtastic port number 76 and includes bounded binary fragmentation,
+sender-separated reassembly, configurable channel and modem settings,
+conservative airtime safeguards, and radio reconnect handling.
 
 To understand the foundational philosophy and goals of this system, read the [Zen of Reticulum](Zen%20of%20Reticulum.md).
 
