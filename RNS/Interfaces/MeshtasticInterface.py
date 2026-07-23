@@ -168,6 +168,8 @@ class MeshtasticInterface(Interface):
     def _on_receive(self, packet, interface):
         if interface is not self.mesh_interface:
             return
+        if packet.get("channel", 0) != self.channel:
+            return
         decoded = packet.get("decoded", {})
         port_num = decoded.get("portnum")
         if port_num not in (self.port_num, "RETICULUM_TUNNEL_APP"):
