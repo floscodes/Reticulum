@@ -32,6 +32,7 @@
 
 import binascii
 import os
+import queue
 import threading
 import time
 
@@ -91,7 +92,13 @@ class MeshtasticInterface(Interface):
     DEFAULT_BITRATE = 118
     DEFAULT_PAYLOAD_SIZE = 233
     DEFAULT_REASSEMBLY_TIMEOUT = 300
-    MAX_REASSEMBLIES = 64
+    DEFAULT_SEND_INTERVAL = 1.0
+    DEFAULT_RECONNECT_INTERVAL = 5.0
+    DEFAULT_MAX_RECONNECT_INTERVAL = 60.0
+    DEFAULT_MAX_REASSEMBLIES = 64
+    DEFAULT_MAX_REASSEMBLIES_PER_SENDER = 8
+    DEFAULT_MAX_PACKET_SIZE = 65535
+    DEFAULT_MAX_PENDING_PACKETS = 128
 
     def __init__(self, owner, configuration):
         super().__init__()
@@ -102,10 +109,18 @@ class MeshtasticInterface(Interface):
         self.destination = c["destination"] if "destination" in c else "^all"
         self.payload_size = c.as_int("payload_size") if "payload_size" in c else self.DEFAULT_PAYLOAD_SIZE
         self.reassembly_timeout = c.as_float("reassembly_timeout") if "reassembly_timeout" in c else self.DEFAULT_REASSEMBLY_TIMEOUT
+        self.max_reassemblies = c.as_int("max_reassemblies") if "max_reassemblies" in c else self.DEFAULT_MAX_REASSEMBLIES
+        self.max_reassemblies_per_sender = c.as_int("max_reassemblies_per_sender") if "max_reassemblies_per_sender" in c else self.DEFAULT_MAX_REASSEMBLIES_PER_SENDER
+        self.max_packet_size = c.as_int("max_packet_size") if "max_packet_size" in c else self.DEFAULT_MAX_PACKET_SIZE
+        self.max_pending_packets = c.as_int("max_pending_packets") if "max_pending_packets" in c else self.DEFAULT_MAX_PENDING_PACKETS
         self.connection_timeout = c.as_int("connection_timeout") if "connection_timeout" in c else 30
+        self.send_interval = c.as_float("send_interval") if "send_interval" in c else self.DEFAULT_SEND_INTERVAL
+        self.reconnect_interval = c.as_float("reconnect_interval") if "reconnect_interval" in c else self.DEFAULT_RECONNECT_INTERVAL
+        self.max_reconnect_interval = c.as_float("max_reconnect_interval") if "max_reconnect_interval" in c else self.DEFAULT_MAX_RECONNECT_INTERVAL
         self.want_ack = c.as_bool("want_ack") if "want_ack" in c else False
         self.hop_limit = c.as_int("hop_limit") if "hop_limit" in c else None
         self.bitrate = c.as_int("bitrate") if "bitrate" in c else self.DEFAULT_BITRATE
+        self._validate_config()
         self.HW_MTU = 500
         # Reticulum only forwards outbound packets to interfaces explicitly
         # marked as outgoing. This interface carries traffic in both directions.
@@ -116,14 +131,50 @@ class MeshtasticInterface(Interface):
         self.fragments = {}
         self.fragments_lock = threading.Lock()
         self.send_lock = threading.Lock()
+        self.connection_lock = threading.Lock()
+        self.reconnect_stop = threading.Event()
+        self.reconnect_thread = None
+        self.outbound_queue = queue.Queue(maxsize=self.max_pending_packets)
 
         self.port, self.host, self.ble = self._connection_config(c)
         self._load_meshtastic()
         self.mesh_interface = self._connect()
         self.pub.subscribe(self._on_receive, "meshtastic.receive")
         self.pub.subscribe(self._on_connection_lost, "meshtastic.connection.lost")
+        self.pub.subscribe(self._on_connection_established, "meshtastic.connection.established")
         self.online = self.mesh_interface.isConnected.is_set()
+        self.sender_thread = threading.Thread(
+            target=self._sender_loop,
+            name=f"meshtastic-sender-{self.name}",
+            daemon=True,
+        )
+        self.sender_thread.start()
         RNS.log(f"Meshtastic binary interface {self} is ready", RNS.LOG_NOTICE)
+
+    def _validate_config(self):
+        """Reject unsafe limits early instead of failing in callback threads."""
+        if not MeshtasticFrameCodec.HEADER_SIZE < self.payload_size <= self.DEFAULT_PAYLOAD_SIZE:
+            raise ValueError(
+                f"payload_size must be between {MeshtasticFrameCodec.HEADER_SIZE + 1} "
+                f"and {self.DEFAULT_PAYLOAD_SIZE}"
+            )
+        if self.reassembly_timeout <= 0:
+            raise ValueError("reassembly_timeout must be greater than zero")
+        if self.max_reassemblies < 1 or self.max_reassemblies_per_sender < 1:
+            raise ValueError("Meshtastic reassembly limits must be greater than zero")
+        if self.max_reassemblies_per_sender > self.max_reassemblies:
+            raise ValueError("max_reassemblies_per_sender cannot exceed max_reassemblies")
+        if self.max_packet_size < 1:
+            raise ValueError("max_packet_size must be greater than zero")
+        if self.max_pending_packets < 1:
+            raise ValueError("max_pending_packets must be greater than zero")
+        if self.send_interval < 0:
+            raise ValueError("send_interval cannot be negative")
+        if self.reconnect_interval <= 0 or self.max_reconnect_interval < self.reconnect_interval:
+            raise ValueError(
+                "Reconnect intervals must be positive and max_reconnect_interval "
+                "cannot be smaller than reconnect_interval"
+            )
 
     @staticmethod
     def _connection_config(c):
@@ -176,24 +227,111 @@ class MeshtasticInterface(Interface):
             return
         payload = decoded.get("payload")
         if isinstance(payload, bytes):
-            self._process_frame(payload)
+            # A transfer identifier is intentionally scoped to its Meshtastic
+            # sender. This prevents fragments from different radios with a
+            # coincidentally identical random transfer ID from being combined.
+            # Synthetic/test packets may omit it and share an explicit fallback
+            # namespace; real Meshtastic receive packets include one of these.
+            sender = packet.get("fromId") or packet.get("from") or "unknown"
+            self._process_frame(payload, sender)
 
     def _on_connection_lost(self, interface):
         if interface is self.mesh_interface and not self.detached:
             self.online = False
             RNS.log(f"Meshtastic connection lost for {self}", RNS.LOG_WARNING)
+            self._start_reconnect()
 
-    def _process_frame(self, frame):
+    def _on_connection_established(self, interface):
+        if interface is self.mesh_interface and not self.detached:
+            self.online = True
+            RNS.log(f"Meshtastic connection established for {self}", RNS.LOG_NOTICE)
+
+    def _start_reconnect(self):
+        """Start at most one reconnect worker for a lost radio connection."""
+        with self.connection_lock:
+            if self.detached or (
+                self.reconnect_thread is not None and self.reconnect_thread.is_alive()
+            ):
+                return
+            self.reconnect_thread = threading.Thread(
+                target=self._reconnect_loop,
+                name=f"meshtastic-reconnect-{self.name}",
+                daemon=True,
+            )
+            self.reconnect_thread.start()
+
+    def _reconnect_loop(self):
+        """Reconnect with bounded exponential backoff until detached."""
+        delay = self.reconnect_interval
+        while not self.reconnect_stop.wait(delay):
+            if self.detached:
+                return
+            RNS.log(f"Attempting to reconnect {self}", RNS.LOG_VERBOSE)
+            try:
+                replacement = self._connect()
+                with self.connection_lock:
+                    if self.detached:
+                        replacement.close()
+                        return
+                    previous = self.mesh_interface
+                    self.mesh_interface = replacement
+                    self.online = replacement.isConnected.is_set()
+                if previous is not replacement:
+                    try:
+                        previous.close()
+                    except Exception:
+                        pass
+                if self.online:
+                    RNS.log(f"Reconnected {self}", RNS.LOG_NOTICE)
+                    return
+            except Exception as error:
+                RNS.log(f"Could not reconnect {self}: {error}", RNS.LOG_WARNING)
+            delay = min(delay * 2, self.max_reconnect_interval)
+
+    def _process_frame(self, frame, sender):
+        if len(frame) > self.payload_size:
+            RNS.log(f"Discarding oversized Meshtastic frame on {self}", RNS.LOG_WARNING)
+            return
         decoded = MeshtasticFrameCodec.decode(frame)
         if decoded is None:
             return
         transfer_id, index, count, checksum, payload = decoded
-        key = (transfer_id, count, checksum)
+        key = (sender, transfer_id)
         now = time.monotonic()
         with self.fragments_lock:
             self._expire_fragments(now)
-            entry = self.fragments.setdefault(key, {"created": now, "parts": {}})
-            entry["parts"][index] = payload
+            entry = self.fragments.get(key)
+            if entry is None:
+                self._make_reassembly_room(sender)
+                entry = {
+                    "created": now,
+                    "updated": now,
+                    "count": count,
+                    "checksum": checksum,
+                    "size": 0,
+                    "parts": {},
+                }
+                self.fragments[key] = entry
+            elif entry["count"] != count or entry["checksum"] != checksum:
+                # Reusing a transfer ID with conflicting metadata is malformed.
+                # Discard both interpretations instead of assembling ambiguity.
+                self.fragments.pop(key, None)
+                RNS.log(f"Discarding inconsistent Meshtastic transfer on {self}", RNS.LOG_WARNING)
+                return
+
+            previous = entry["parts"].get(index)
+            if previous is not None and previous != payload:
+                self.fragments.pop(key, None)
+                RNS.log(f"Discarding conflicting Meshtastic fragment on {self}", RNS.LOG_WARNING)
+                return
+            if previous is None:
+                entry["parts"][index] = payload
+                entry["size"] += len(payload)
+            entry["updated"] = now
+            if entry["size"] > self.max_packet_size:
+                self.fragments.pop(key, None)
+                RNS.log(f"Discarding oversized Meshtastic transfer on {self}", RNS.LOG_WARNING)
+                return
             if len(entry["parts"]) != count:
                 return
             data = b"".join(entry["parts"][part] for part in range(count))
@@ -205,23 +343,59 @@ class MeshtasticInterface(Interface):
         self.owner.inbound(data, self)
 
     def _expire_fragments(self, now):
-        expired = [key for key, value in self.fragments.items() if now - value["created"] > self.reassembly_timeout]
+        # Activity-based expiry permits a slow but progressing transfer while
+        # ensuring abandoned state cannot remain in memory indefinitely.
+        expired = [
+            key for key, value in self.fragments.items()
+            if now - value["updated"] > self.reassembly_timeout
+        ]
         for key in expired:
             self.fragments.pop(key, None)
-        while len(self.fragments) >= self.MAX_REASSEMBLIES:
-            self.fragments.pop(next(iter(self.fragments)))
 
-    def process_incoming(self, data):
+    def _make_reassembly_room(self, sender):
+        """Enforce global and per-sender limits using oldest-entry eviction."""
+        sender_keys = [key for key in self.fragments if key[0] == sender]
+        while len(sender_keys) >= self.max_reassemblies_per_sender:
+            oldest = min(sender_keys, key=lambda key: self.fragments[key]["updated"])
+            self.fragments.pop(oldest, None)
+            sender_keys.remove(oldest)
+        while len(self.fragments) >= self.max_reassemblies:
+            oldest = min(self.fragments, key=lambda key: self.fragments[key]["updated"])
+            self.fragments.pop(oldest, None)
+
+    def process_incoming(self, data, sender="local"):
         """Accept a binary frame from a Meshtastic callback or test."""
-        self._process_frame(data)
+        self._process_frame(data, sender)
 
     def process_outgoing(self, data):
         if self.detached or not self.online:
             return
         try:
+            # Keep the Reticulum transport thread non-blocking while the
+            # dedicated sender applies radio-friendly pacing.
+            self.outbound_queue.put_nowait(bytes(data))
+        except queue.Full:
+            RNS.log(f"Outbound Meshtastic queue is full on {self}", RNS.LOG_WARNING)
+
+    def _sender_loop(self):
+        while not self.reconnect_stop.is_set():
+            try:
+                data = self.outbound_queue.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            try:
+                self._transmit_packet(data)
+            finally:
+                self.outbound_queue.task_done()
+
+    def _transmit_packet(self, data):
+        """Send one queued RNS packet without blocking Reticulum itself."""
+        try:
             frames = MeshtasticFrameCodec.encode(data, self.payload_size)
             with self.send_lock:
-                for frame in frames:
+                for index, frame in enumerate(frames):
+                    if self.detached or not self.online:
+                        return
                     self.mesh_interface.sendData(
                         frame,
                         destinationId=self.destination,
@@ -230,16 +404,24 @@ class MeshtasticInterface(Interface):
                         channelIndex=self.channel,
                         hopLimit=self.hop_limit,
                     )
+                    # The delay is between fragments, never after the last one.
+                    if self.send_interval and index + 1 < len(frames):
+                        if self.reconnect_stop.wait(self.send_interval):
+                            return
             self.txb += len(data)
         except Exception as error:
+            self.online = False
             RNS.log(f"Could not transmit on {self}: {error}", RNS.LOG_ERROR)
+            self._start_reconnect()
 
     def detach(self):
         self.detached = True
         self.online = False
+        self.reconnect_stop.set()
         try:
             self.pub.unsubscribe(self._on_receive, "meshtastic.receive")
             self.pub.unsubscribe(self._on_connection_lost, "meshtastic.connection.lost")
+            self.pub.unsubscribe(self._on_connection_established, "meshtastic.connection.established")
             self.mesh_interface.close()
         except Exception as error:
             RNS.log(f"Could not close {self}: {error}", RNS.LOG_DEBUG)

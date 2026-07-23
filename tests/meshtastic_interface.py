@@ -1,4 +1,7 @@
+import queue
+import threading
 import unittest
+from unittest.mock import Mock
 
 from RNS.Interfaces.MeshtasticInterface import MeshtasticFrameCodec, MeshtasticInterface
 
@@ -32,7 +35,7 @@ class MeshtasticFrameCodecTest(unittest.TestCase):
         interface.mesh_interface = mesh_interface
         interface.channel = 2
         interface.port_num = 76
-        interface._process_frame = received.append
+        interface._process_frame = lambda payload, sender: received.append(payload)
 
         interface._on_receive(
             {"channel": 1, "decoded": {"portnum": 76, "payload": b"wrong"}},
@@ -52,7 +55,7 @@ class MeshtasticFrameCodecTest(unittest.TestCase):
         interface.mesh_interface = mesh_interface
         interface.channel = 0
         interface.port_num = 76
-        interface._process_frame = received.append
+        interface._process_frame = lambda payload, sender: received.append(payload)
 
         interface._on_receive(
             {"decoded": {"portnum": "RETICULUM_TUNNEL_APP", "payload": b"primary"}},
@@ -60,6 +63,129 @@ class MeshtasticFrameCodecTest(unittest.TestCase):
         )
 
         self.assertEqual(received, [b"primary"])
+
+    def make_interface(self):
+        interface = MeshtasticInterface.__new__(MeshtasticInterface)
+        interface.name = "test"
+        interface.fragments = {}
+        interface.fragments_lock = threading.Lock()
+        interface.payload_size = 233
+        interface.reassembly_timeout = 30
+        interface.max_reassemblies = 4
+        interface.max_reassemblies_per_sender = 2
+        interface.max_packet_size = 4096
+        interface.owner = Mock()
+        interface.rxb = 0
+        return interface
+
+    def test_reassembly_is_separated_by_sender(self):
+        interface = self.make_interface()
+        packet_a = b"A" * 300
+        packet_b = b"B" * 300
+        frames_a = MeshtasticFrameCodec.encode(packet_a, payload_size=80)
+        frames_b = MeshtasticFrameCodec.encode(packet_b, payload_size=80)
+
+        # Force the same transfer identifier to demonstrate that sender identity
+        # remains part of the reassembly key.
+        frames_b = [frame[:5] + frames_a[0][5:9] + frame[9:] for frame in frames_b]
+        for frame_a, frame_b in zip(frames_a, frames_b):
+            interface.process_incoming(frame_a, sender=1)
+            interface.process_incoming(frame_b, sender=2)
+
+        calls = [call.args[0] for call in interface.owner.inbound.call_args_list]
+        self.assertEqual(calls, [packet_a, packet_b])
+
+    def test_conflicting_fragment_discards_transfer(self):
+        interface = self.make_interface()
+        frames = MeshtasticFrameCodec.encode(b"test packet" * 20, payload_size=80)
+        interface.process_incoming(frames[0], sender=1)
+        conflicting = frames[0][:-1] + bytes([frames[0][-1] ^ 0xff])
+        interface.process_incoming(conflicting, sender=1)
+
+        self.assertEqual(interface.fragments, {})
+        interface.owner.inbound.assert_not_called()
+
+    def test_reassembly_limits_evict_oldest_sender_state(self):
+        interface = self.make_interface()
+        interface.max_reassemblies_per_sender = 1
+        first = MeshtasticFrameCodec.encode(b"A" * 200, payload_size=80)
+        second = MeshtasticFrameCodec.encode(b"B" * 200, payload_size=80)
+
+        interface.process_incoming(first[0], sender=1)
+        first_key = next(iter(interface.fragments))
+        interface.process_incoming(second[0], sender=1)
+
+        self.assertEqual(len(interface.fragments), 1)
+        self.assertNotIn(first_key, interface.fragments)
+
+    def test_oversized_transfer_is_discarded(self):
+        interface = self.make_interface()
+        interface.max_packet_size = 10
+        frame = MeshtasticFrameCodec.encode(b"A" * 20, payload_size=80)[0]
+
+        interface.process_incoming(frame, sender=1)
+
+        self.assertEqual(interface.fragments, {})
+        interface.owner.inbound.assert_not_called()
+
+    def test_outgoing_fragments_are_paced(self):
+        interface = self.make_interface()
+        interface.detached = False
+        interface.online = True
+        interface.payload_size = 80
+        interface.send_interval = 0.25
+        interface.send_lock = threading.Lock()
+        interface.mesh_interface = Mock()
+        interface.destination = "^all"
+        interface.port_num = 76
+        interface.want_ack = False
+        interface.channel = 0
+        interface.hop_limit = None
+        interface.txb = 0
+        interface.reconnect_stop = Mock()
+        interface.reconnect_stop.is_set.return_value = False
+        interface.reconnect_stop.wait.return_value = False
+
+        data = bytes(range(200))
+        interface._transmit_packet(data)
+
+        frame_count = len(MeshtasticFrameCodec.encode(data, 80))
+        self.assertEqual(interface.mesh_interface.sendData.call_count, frame_count)
+        self.assertEqual(interface.reconnect_stop.wait.call_count, frame_count - 1)
+        interface.reconnect_stop.wait.assert_called_with(0.25)
+
+    def test_reconnect_replaces_lost_interface(self):
+        interface = self.make_interface()
+        previous = Mock()
+        replacement = Mock()
+        replacement.isConnected.is_set.return_value = True
+        interface.mesh_interface = previous
+        interface.connection_lock = threading.Lock()
+        interface.detached = False
+        interface.online = False
+        interface.reconnect_interval = 1
+        interface.max_reconnect_interval = 4
+        interface.reconnect_stop = Mock()
+        interface.reconnect_stop.wait.return_value = False
+        interface._connect = Mock(return_value=replacement)
+
+        interface._reconnect_loop()
+
+        self.assertIs(interface.mesh_interface, replacement)
+        self.assertTrue(interface.online)
+        previous.close.assert_called_once_with()
+
+    def test_full_outbound_queue_drops_without_blocking(self):
+        interface = self.make_interface()
+        interface.detached = False
+        interface.online = True
+        interface.outbound_queue = queue.Queue(maxsize=1)
+        interface.outbound_queue.put_nowait(b"already queued")
+
+        interface.process_outgoing(b"new packet")
+
+        self.assertEqual(interface.outbound_queue.qsize(), 1)
+        self.assertEqual(interface.outbound_queue.get_nowait(), b"already queued")
 
 
 if __name__ == "__main__":

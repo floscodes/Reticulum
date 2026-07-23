@@ -789,8 +789,10 @@ Install Reticulum with the optional dependency: `pip install "rns[meshtastic]"`.
 
 RNS packets are sent as binary Meshtastic data on `RETICULUM_TUNNEL_APP`, not as
 text messages. The interface fragments only packets larger than Meshtastic's
-233-byte application payload limit. Use a dedicated Meshtastic channel and
-conservative airtime settings.
+233-byte application payload limit. Its versioned `RNSM` framing includes a
+random transfer ID, fragment count and whole-packet CRC. Reassembly is isolated
+per Meshtastic sender and bounded by time, packet size and concurrent-transfer
+limits. Use a dedicated Meshtastic channel and conservative airtime settings.
 
 ```ini
 [[Meshtastic]]
@@ -809,11 +811,29 @@ conservative airtime settings.
 
   # Maximum Meshtastic application payload, normally 233 bytes.
   # payload_size = 233
+  # Delay in seconds between fragments. Set to 0 to disable pacing.
+  # send_interval = 1.0
+
+  # Incomplete-transfer lifetime and memory/resource limits.
+  # reassembly_timeout = 300
+  # max_reassemblies = 64
+  # max_reassemblies_per_sender = 8
+  # max_packet_size = 65535
+  # max_pending_packets = 128
+
+  # Lost radio connections are retried with exponential backoff.
   # connection_timeout = 30
+  # reconnect_interval = 5
+  # max_reconnect_interval = 60
   # want_ack = no
   # hop_limit = 3
   # bitrate = 118
 ```
+
+The interface intentionally accepts only its versioned `RNSM` wire format.
+The earlier two-byte `RNS_Over_Meshtastic` fragment format can be implemented
+as an explicit compatibility mode, but is not auto-detected because it has no
+magic or version field and its broadcast retransmission requests are ambiguous.
 
 ## KISS Interface
 
