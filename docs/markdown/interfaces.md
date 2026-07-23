@@ -833,16 +833,16 @@ limits. Use a dedicated Meshtastic channel and conservative airtime settings.
   # reconnect_interval = 5
   # max_reconnect_interval = 60
 
-  # These transport-safety values are fixed. Reticulum handles reliability,
-  # while one-hop forwarding prevents fragmented packets from flooding the mesh.
+  # Reticulum handles reliability, so Meshtastic ACKs remain disabled.
+  # Hop limit 1 is the default; use 0 for direct-radio-only operation.
   # want_ack = no
   # hop_limit = 1
   # bitrate = 118
 ```
 
-`want_ack` must be `no` and `hop_limit` must be `1` if explicitly specified.
-Other values are rejected instead of silently creating redundant ACK traffic or
-multi-hop flooding.
+`want_ack` must be `no`. `hop_limit` may be `0` (no rebroadcast, direct radio
+range only) or `1` (at most one rebroadcast). All other hop-limit values are
+rejected instead of silently enabling multi-hop flooding.
 
 Supported modem presets are taken from the installed Meshtastic library. Current
 versions provide `LongFast`, `LongSlow`, `VeryLongSlow`, `MediumSlow`,

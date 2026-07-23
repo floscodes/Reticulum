@@ -1,6 +1,6 @@
 # Reticulum License
 #
-# Copyright (c) 2026 flopetautschnig (floscodes)
+# Copyright (c) 2026 floscodes
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -104,7 +104,8 @@ class MeshtasticInterface(Interface):
     DEFAULT_MAX_REASSEMBLIES_PER_SENDER = 8
     DEFAULT_MAX_PACKET_SIZE = 65535
     DEFAULT_MAX_PENDING_PACKETS = 128
-    REQUIRED_HOP_LIMIT = 1
+    DEFAULT_HOP_LIMIT = 1
+    ALLOWED_HOP_LIMITS = (0, 1)
 
     def __init__(self, owner, configuration):
         super().__init__()
@@ -125,13 +126,13 @@ class MeshtasticInterface(Interface):
         self.reconnect_interval = c.as_float("reconnect_interval") if "reconnect_interval" in c else self.DEFAULT_RECONNECT_INTERVAL
         self.max_reconnect_interval = c.as_float("max_reconnect_interval") if "max_reconnect_interval" in c else self.DEFAULT_MAX_RECONNECT_INTERVAL
         configured_want_ack = c.as_bool("want_ack") if "want_ack" in c else False
-        configured_hop_limit = c.as_int("hop_limit") if "hop_limit" in c else self.REQUIRED_HOP_LIMIT
+        configured_hop_limit = c.as_int("hop_limit") if "hop_limit" in c else self.DEFAULT_HOP_LIMIT
         self._validate_transport_policy(configured_want_ack, configured_hop_limit)
         # Reticulum supplies its own reliability mechanisms. Meshtastic ACKs
         # would add redundant traffic, and a single hop bounds fragment
         # flooding on the shared LoRa channel.
         self.want_ack = False
-        self.hop_limit = self.REQUIRED_HOP_LIMIT
+        self.hop_limit = configured_hop_limit
         self.bitrate = c.as_int("bitrate") if "bitrate" in c else self.DEFAULT_BITRATE
         self._validate_config()
         self.HW_MTU = 500
@@ -170,9 +171,9 @@ class MeshtasticInterface(Interface):
         """Enforce Reticulum-safe Meshtastic forwarding invariants."""
         if want_ack:
             raise ValueError("MeshtasticInterface requires want_ack = no")
-        if hop_limit != cls.REQUIRED_HOP_LIMIT:
+        if hop_limit not in cls.ALLOWED_HOP_LIMITS:
             raise ValueError(
-                f"MeshtasticInterface requires hop_limit = {cls.REQUIRED_HOP_LIMIT}"
+                "MeshtasticInterface requires hop_limit to be 0 or 1"
             )
 
     def _validate_config(self):
@@ -498,7 +499,7 @@ class MeshtasticInterface(Interface):
                         # redundant Meshtastic acknowledgements.
                         wantAck=False,
                         channelIndex=self.channel,
-                        hopLimit=self.REQUIRED_HOP_LIMIT,
+                        hopLimit=self.hop_limit,
                     )
                     # The delay is between fragments, never after the last one.
                     if self.send_interval and index + 1 < len(frames):

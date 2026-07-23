@@ -11,7 +11,8 @@ class MeshtasticFrameCodecTest(unittest.TestCase):
         self.assertEqual(MeshtasticInterface.DEFAULT_IFAC_SIZE, 8)
         self.assertEqual(MeshtasticInterface.DEFAULT_PAYLOAD_SIZE, 200)
         self.assertEqual(MeshtasticInterface.MAX_PAYLOAD_SIZE, 200)
-        self.assertEqual(MeshtasticInterface.REQUIRED_HOP_LIMIT, 1)
+        self.assertEqual(MeshtasticInterface.DEFAULT_HOP_LIMIT, 1)
+        self.assertEqual(MeshtasticInterface.ALLOWED_HOP_LIMITS, (0, 1))
 
     def test_payload_size_above_safe_limit_is_rejected(self):
         interface = self.make_interface()
@@ -29,8 +30,12 @@ class MeshtasticFrameCodecTest(unittest.TestCase):
             MeshtasticInterface._validate_transport_policy(True, 1)
 
     def test_multihop_forwarding_is_rejected(self):
-        with self.assertRaisesRegex(ValueError, "hop_limit = 1"):
+        with self.assertRaisesRegex(ValueError, "hop_limit to be 0 or 1"):
             MeshtasticInterface._validate_transport_policy(False, 2)
+
+    def test_zero_and_one_hop_are_allowed(self):
+        MeshtasticInterface._validate_transport_policy(False, 0)
+        MeshtasticInterface._validate_transport_policy(False, 1)
 
     def test_modem_preset_name_normalisation(self):
         normalise = MeshtasticInterface._normalise_modem_preset
@@ -185,7 +190,7 @@ class MeshtasticFrameCodecTest(unittest.TestCase):
         interface.port_num = 76
         interface.want_ack = False
         interface.channel = 0
-        interface.hop_limit = None
+        interface.hop_limit = 0
         interface.txb = 0
         interface.reconnect_stop = Mock()
         interface.reconnect_stop.is_set.return_value = False
@@ -198,7 +203,7 @@ class MeshtasticFrameCodecTest(unittest.TestCase):
         self.assertEqual(interface.mesh_interface.sendData.call_count, frame_count)
         for call in interface.mesh_interface.sendData.call_args_list:
             self.assertFalse(call.kwargs["wantAck"])
-            self.assertEqual(call.kwargs["hopLimit"], 1)
+            self.assertEqual(call.kwargs["hopLimit"], interface.hop_limit)
         self.assertEqual(interface.reconnect_stop.wait.call_count, frame_count - 1)
         interface.reconnect_stop.wait.assert_called_with(0.25)
 
