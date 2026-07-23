@@ -826,10 +826,17 @@ limits. Use a dedicated Meshtastic channel and conservative airtime settings.
   # connection_timeout = 30
   # reconnect_interval = 5
   # max_reconnect_interval = 60
+
+  # These transport-safety values are fixed. Reticulum handles reliability,
+  # while one-hop forwarding prevents fragmented packets from flooding the mesh.
   # want_ack = no
-  # hop_limit = 3
+  # hop_limit = 1
   # bitrate = 118
 ```
+
+`want_ack` must be `no` and `hop_limit` must be `1` if explicitly specified.
+Other values are rejected instead of silently creating redundant ACK traffic or
+multi-hop flooding.
 
 The interface intentionally accepts only its versioned `RNSM` wire format.
 The earlier two-byte `RNS_Over_Meshtastic` fragment format can be implemented

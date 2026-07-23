@@ -11,6 +11,7 @@ class MeshtasticFrameCodecTest(unittest.TestCase):
         self.assertEqual(MeshtasticInterface.DEFAULT_IFAC_SIZE, 8)
         self.assertEqual(MeshtasticInterface.DEFAULT_PAYLOAD_SIZE, 200)
         self.assertEqual(MeshtasticInterface.MAX_PAYLOAD_SIZE, 200)
+        self.assertEqual(MeshtasticInterface.REQUIRED_HOP_LIMIT, 1)
 
     def test_payload_size_above_safe_limit_is_rejected(self):
         interface = self.make_interface()
@@ -22,6 +23,14 @@ class MeshtasticFrameCodecTest(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "between 16 and 200"):
             interface._validate_config()
+
+    def test_meshtastic_acknowledgements_are_rejected(self):
+        with self.assertRaisesRegex(ValueError, "want_ack = no"):
+            MeshtasticInterface._validate_transport_policy(True, 1)
+
+    def test_multihop_forwarding_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "hop_limit = 1"):
+            MeshtasticInterface._validate_transport_policy(False, 2)
 
     def test_binary_round_trip_multiframe(self):
         packet = bytes(range(256)) + bytes(range(244))
@@ -164,6 +173,9 @@ class MeshtasticFrameCodecTest(unittest.TestCase):
 
         frame_count = len(MeshtasticFrameCodec.encode(data, 80))
         self.assertEqual(interface.mesh_interface.sendData.call_count, frame_count)
+        for call in interface.mesh_interface.sendData.call_args_list:
+            self.assertFalse(call.kwargs["wantAck"])
+            self.assertEqual(call.kwargs["hopLimit"], 1)
         self.assertEqual(interface.reconnect_stop.wait.call_count, frame_count - 1)
         interface.reconnect_stop.wait.assert_called_with(0.25)
 
