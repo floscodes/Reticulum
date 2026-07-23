@@ -64,5 +64,6 @@ setuptools.setup(
         ]
     },
     install_requires=requirements,
+    extras_require={"meshtastic": ["meshtastic>=2.7.11"]},
     python_requires='>=3.7',
 )

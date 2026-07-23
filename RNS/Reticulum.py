@@ -40,6 +40,7 @@ if get_platform() == "android":
     from .Interfaces import I2PInterface
     from .Interfaces import RNodeMultiInterface
     from .Interfaces import WeaveInterface
+    from .Interfaces import MeshtasticInterface
     from .Interfaces.Android import RNodeInterface
     from .Interfaces.Android import SerialInterface
     from .Interfaces.Android import KISSInterface
@@ -1009,6 +1010,10 @@ class Reticulum:
 
                 if c["type"] == "WeaveInterface":
                     interface = WeaveInterface.WeaveInterface(RNS.Transport, interface_config)
+                    interface_post_init(interface)
+
+                if c["type"] == "MeshtasticInterface":
+                    interface = MeshtasticInterface.MeshtasticInterface(RNS.Transport, interface_config)
                     interface_post_init(interface)
 
                 if bootstrap_only and instance_init: self.bootstrap_configs.append(interface_config)
