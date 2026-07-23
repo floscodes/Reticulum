@@ -90,7 +90,11 @@ class MeshtasticInterface(Interface):
 
     DEFAULT_IFAC_SIZE = 8
     DEFAULT_BITRATE = 118
-    DEFAULT_PAYLOAD_SIZE = 233
+    # Although Meshtastic defines a 233-byte application maximum, some real
+    # BLE/firmware combinations drop frames at that exact boundary. Keeping
+    # headroom here is more reliable and matches established tunnel practice.
+    DEFAULT_PAYLOAD_SIZE = 200
+    MAX_PAYLOAD_SIZE = 233
     DEFAULT_REASSEMBLY_TIMEOUT = 300
     DEFAULT_SEND_INTERVAL = 1.0
     DEFAULT_RECONNECT_INTERVAL = 5.0
@@ -153,10 +157,10 @@ class MeshtasticInterface(Interface):
 
     def _validate_config(self):
         """Reject unsafe limits early instead of failing in callback threads."""
-        if not MeshtasticFrameCodec.HEADER_SIZE < self.payload_size <= self.DEFAULT_PAYLOAD_SIZE:
+        if not MeshtasticFrameCodec.HEADER_SIZE < self.payload_size <= self.MAX_PAYLOAD_SIZE:
             raise ValueError(
                 f"payload_size must be between {MeshtasticFrameCodec.HEADER_SIZE + 1} "
-                f"and {self.DEFAULT_PAYLOAD_SIZE}"
+                f"and {self.MAX_PAYLOAD_SIZE}"
             )
         if self.reassembly_timeout <= 0:
             raise ValueError("reassembly_timeout must be greater than zero")
@@ -213,8 +217,35 @@ class MeshtasticInterface(Interface):
         if self.host:
             return self.TCPInterface(hostname=self.host, **options)
         if self.ble:
-            return self.BLEInterface(address=self.ble, **options)
+            connection = self.BLEInterface(address=self.ble, **options)
+            self._configure_ble_disconnect(connection)
+            return connection
         return self.SerialInterface(**options)
+
+    @staticmethod
+    def _configure_ble_disconnect(connection):
+        """Keep Meshtastic's BLE callback from closing its own event thread.
+
+        On Windows, the library callback calls ``close()`` from Bleak's
+        disconnected callback. That cleanup can recursively disconnect and
+        join the event thread that is currently executing it. Publishing the
+        normal Meshtastic disconnect event is sufficient here: our reconnect
+        worker later closes the stale wrapper from a safe thread.
+        """
+        client = getattr(getattr(connection, "client", None), "bleak_client", None)
+        if client is None:
+            return
+
+        # Current Bleak exposes callback replacement on the selected backend,
+        # not on its public facade. Backend callbacks receive no arguments.
+        backend = getattr(client, "_backend", client)
+        callback = lambda: connection._disconnected()
+        setter = getattr(backend, "set_disconnected_callback", None)
+        if callable(setter):
+            setter(callback)
+        else:
+            # Bleak versions without the public setter store the callback here.
+            backend._disconnected_callback = callback
 
     def _on_receive(self, packet, interface):
         if interface is not self.mesh_interface:

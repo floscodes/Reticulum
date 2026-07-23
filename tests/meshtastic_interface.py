@@ -9,6 +9,8 @@ from RNS.Interfaces.MeshtasticInterface import MeshtasticFrameCodec, MeshtasticI
 class MeshtasticFrameCodecTest(unittest.TestCase):
     def test_reticulum_interface_defaults(self):
         self.assertEqual(MeshtasticInterface.DEFAULT_IFAC_SIZE, 8)
+        self.assertEqual(MeshtasticInterface.DEFAULT_PAYLOAD_SIZE, 200)
+        self.assertEqual(MeshtasticInterface.MAX_PAYLOAD_SIZE, 233)
 
     def test_binary_round_trip_multiframe(self):
         packet = bytes(range(256)) + bytes(range(244))
@@ -174,6 +176,20 @@ class MeshtasticFrameCodecTest(unittest.TestCase):
         self.assertIs(interface.mesh_interface, replacement)
         self.assertTrue(interface.online)
         previous.close.assert_called_once_with()
+
+    def test_ble_disconnect_callback_only_publishes_loss(self):
+        connection = Mock()
+        bleak_client = Mock()
+        backend = Mock()
+        bleak_client._backend = backend
+        connection.client.bleak_client = bleak_client
+
+        MeshtasticInterface._configure_ble_disconnect(connection)
+        callback = backend.set_disconnected_callback.call_args.args[0]
+        callback()
+
+        connection._disconnected.assert_called_once_with()
+        connection.close.assert_not_called()
 
     def test_full_outbound_queue_drops_without_blocking(self):
         interface = self.make_interface()

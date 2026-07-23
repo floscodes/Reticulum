@@ -809,8 +809,9 @@ limits. Use a dedicated Meshtastic channel and conservative airtime settings.
   channel = 0
   # destination = !12345678
 
-  # Maximum Meshtastic application payload, normally 233 bytes.
-  # payload_size = 233
+  # Conservative default is 200 bytes. Meshtastic permits up to 233, but some
+  # BLE/firmware combinations drop frames at that exact maximum.
+  # payload_size = 200
   # Delay in seconds between fragments. Set to 0 to disable pacing.
   # send_interval = 1.0
 
