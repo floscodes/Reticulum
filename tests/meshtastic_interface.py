@@ -32,6 +32,29 @@ class MeshtasticFrameCodecTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "hop_limit = 1"):
             MeshtasticInterface._validate_transport_policy(False, 2)
 
+    def test_modem_preset_name_normalisation(self):
+        normalise = MeshtasticInterface._normalise_modem_preset
+        self.assertEqual(normalise("LongFast"), "LONG_FAST")
+        self.assertEqual(normalise("very-long-slow"), "VERY_LONG_SLOW")
+        self.assertEqual(normalise("NARROW_SLOW"), "NARROW_SLOW")
+
+    def test_modem_preset_is_only_written_when_changed(self):
+        interface = self.make_interface()
+        interface.modem_preset_value = 2
+        interface.ModemPreset = Mock()
+        interface.ModemPreset.Name.return_value = "VERY_LONG_SLOW"
+        connection = Mock()
+        connection.localNode.localConfig.lora.modem_preset = 1
+
+        interface._apply_modem_preset(connection)
+
+        self.assertEqual(connection.localNode.localConfig.lora.modem_preset, 2)
+        connection.localNode.writeConfig.assert_called_once_with("lora")
+
+        connection.localNode.writeConfig.reset_mock()
+        interface._apply_modem_preset(connection)
+        connection.localNode.writeConfig.assert_not_called()
+
     def test_binary_round_trip_multiframe(self):
         packet = bytes(range(256)) + bytes(range(244))
         frames = MeshtasticFrameCodec.encode(packet, payload_size=80)

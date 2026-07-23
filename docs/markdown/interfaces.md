@@ -805,9 +805,15 @@ limits. Use a dedicated Meshtastic channel and conservative airtime settings.
   # host = meshtastic.local
   # ble = device_name_or_address
 
-  # Meshtastic channel index and optional unicast destination.
+  # Meshtastic channel index and optional unicast destination. Channel 0 is
+  # the only slot guaranteed to exist on a newly configured radio. A dedicated
+  # channel (1-7) is recommended when it is provisioned on every peer.
   channel = 0
   # destination = !12345678
+
+  # Optional radio modem preset. If set, it is validated against the installed
+  # Meshtastic protobuf and written to the radio when the value differs.
+  # modem_preset = LongFast
 
   # The default and enforced maximum are 200 bytes. This deliberately leaves
   # headroom below Meshtastic's theoretical limit for reliable LoRa transport.
@@ -837,6 +843,14 @@ limits. Use a dedicated Meshtastic channel and conservative airtime settings.
 `want_ack` must be `no` and `hop_limit` must be `1` if explicitly specified.
 Other values are rejected instead of silently creating redundant ACK traffic or
 multi-hop flooding.
+
+Supported modem presets are taken from the installed Meshtastic library. Current
+versions provide `LongFast`, `LongSlow`, `VeryLongSlow`, `MediumSlow`,
+`MediumFast`, `ShortSlow`, `ShortFast`, `LongModerate`, `ShortTurbo`,
+`LongTurbo`, `LiteFast`, `LiteSlow`, `NarrowFast`, and `NarrowSlow`.
+Names are case-insensitive and may be written in camel case, with underscores,
+or with hyphens. Changing the modem preset writes the LoRa configuration to the
+connected radio, so all radios that should communicate must use the same preset.
 
 The interface intentionally accepts only its versioned `RNSM` wire format.
 The earlier two-byte `RNS_Over_Meshtastic` fragment format can be implemented

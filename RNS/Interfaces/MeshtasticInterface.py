@@ -33,6 +33,7 @@
 import binascii
 import os
 import queue
+import re
 import threading
 import time
 
@@ -111,6 +112,7 @@ class MeshtasticInterface(Interface):
         self.owner = owner
         self.name = c["name"]
         self.channel = c.as_int("channel") if "channel" in c else 0
+        self.modem_preset = c["modem_preset"] if "modem_preset" in c and c["modem_preset"] else None
         self.destination = c["destination"] if "destination" in c else "^all"
         self.payload_size = c.as_int("payload_size") if "payload_size" in c else self.DEFAULT_PAYLOAD_SIZE
         self.reassembly_timeout = c.as_float("reassembly_timeout") if "reassembly_timeout" in c else self.DEFAULT_REASSEMBLY_TIMEOUT
@@ -149,6 +151,7 @@ class MeshtasticInterface(Interface):
 
         self.port, self.host, self.ble = self._connection_config(c)
         self._load_meshtastic()
+        self.modem_preset_value = self._resolve_modem_preset(self.modem_preset)
         self.mesh_interface = self._connect()
         self.pub.subscribe(self._on_receive, "meshtastic.receive")
         self.pub.subscribe(self._on_connection_lost, "meshtastic.connection.lost")
@@ -196,6 +199,8 @@ class MeshtasticInterface(Interface):
                 "Reconnect intervals must be positive and max_reconnect_interval "
                 "cannot be smaller than reconnect_interval"
             )
+        if not 0 <= self.channel <= 7:
+            raise ValueError("Meshtastic channel must be between 0 and 7")
 
     @staticmethod
     def _connection_config(c):
@@ -211,6 +216,7 @@ class MeshtasticInterface(Interface):
     def _load_meshtastic(self):
         try:
             from pubsub import pub
+            from meshtastic.protobuf import config_pb2
             from meshtastic.protobuf import portnums_pb2
             from meshtastic.serial_interface import SerialInterface
             from meshtastic.tcp_interface import TCPInterface
@@ -222,6 +228,7 @@ class MeshtasticInterface(Interface):
             ) from error
 
         self.pub = pub
+        self.ModemPreset = config_pb2.Config.LoRaConfig.ModemPreset
         self.port_num = portnums_pb2.PortNum.RETICULUM_TUNNEL_APP
         self.SerialInterface = SerialInterface
         self.TCPInterface = TCPInterface
@@ -230,14 +237,52 @@ class MeshtasticInterface(Interface):
     def _connect(self):
         options = {"noNodes": True, "timeout": self.connection_timeout}
         if self.port:
-            return self.SerialInterface(devPath=self.port, **options)
-        if self.host:
-            return self.TCPInterface(hostname=self.host, **options)
-        if self.ble:
+            connection = self.SerialInterface(devPath=self.port, **options)
+        elif self.host:
+            connection = self.TCPInterface(hostname=self.host, **options)
+        elif self.ble:
             connection = self.BLEInterface(address=self.ble, **options)
             self._configure_ble_disconnect(connection)
-            return connection
-        return self.SerialInterface(**options)
+        else:
+            connection = self.SerialInterface(**options)
+        self._apply_modem_preset(connection)
+        return connection
+
+    @staticmethod
+    def _normalise_modem_preset(value):
+        """Convert LongFast, long-fast and LONG_FAST to protobuf spelling."""
+        value = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", str(value).strip())
+        return value.replace("-", "_").replace(" ", "_").upper()
+
+    def _resolve_modem_preset(self, value):
+        if value is None:
+            return None
+        name = self._normalise_modem_preset(value)
+        try:
+            return self.ModemPreset.Value(name)
+        except ValueError as error:
+            available = ", ".join(self.ModemPreset.keys())
+            raise ValueError(
+                f"Unknown Meshtastic modem_preset {value!r}; available presets: {available}"
+            ) from error
+
+    def _apply_modem_preset(self, connection):
+        """Persist the requested preset without rewriting unchanged radios."""
+        if self.modem_preset_value is None:
+            return
+        node = getattr(connection, "localNode", None)
+        if node is None or getattr(node, "localConfig", None) is None:
+            raise RuntimeError("Meshtastic radio configuration is not available")
+        lora_config = node.localConfig.lora
+        if lora_config.modem_preset == self.modem_preset_value:
+            return
+        lora_config.modem_preset = self.modem_preset_value
+        node.writeConfig("lora")
+        RNS.log(
+            f"Applied Meshtastic modem preset "
+            f"{self.ModemPreset.Name(self.modem_preset_value)} on {self}",
+            RNS.LOG_NOTICE,
+        )
 
     @staticmethod
     def _configure_ble_disconnect(connection):
