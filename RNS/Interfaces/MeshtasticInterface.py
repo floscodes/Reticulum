@@ -17,7 +17,7 @@
 #   dataset, including but not limited to any use that contributes to the
 #   training or development of such a model or algorithm.
 #
-# The above copyright notice and this permission notice shall be included in
+# - The above copyright notice and this permission notice shall be included in
 # all copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
@@ -44,9 +44,9 @@ from RNS.Interfaces.Interface import Interface
 class MeshtasticFrameCodec:
     """Fragment RNS packets into Meshtastic binary payloads.
 
-    Meshtastic limits an application payload to 233 bytes. The header keeps
-    fragment reassembly internal to this interface and never turns binary RNS
-    traffic into text.
+    This interface deliberately caps application payloads at 200 bytes, below
+    Meshtastic's theoretical limit. The header keeps fragment reassembly
+    internal to this interface and never turns binary RNS traffic into text.
     """
 
     MAGIC = b"RNSM"
@@ -129,8 +129,8 @@ class MeshtasticInterface(Interface):
         configured_hop_limit = c.as_int("hop_limit") if "hop_limit" in c else self.DEFAULT_HOP_LIMIT
         self._validate_transport_policy(configured_want_ack, configured_hop_limit)
         # Reticulum supplies its own reliability mechanisms. Meshtastic ACKs
-        # would add redundant traffic, and a single hop bounds fragment
-        # flooding on the shared LoRa channel.
+        # would add redundant traffic, while zero or one permitted relay bounds
+        # fragment flooding on the shared LoRa channel.
         self.want_ack = False
         self.hop_limit = configured_hop_limit
         self.bitrate = c.as_int("bitrate") if "bitrate" in c else self.DEFAULT_BITRATE

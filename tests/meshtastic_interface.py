@@ -119,7 +119,7 @@ class MeshtasticFrameCodecTest(unittest.TestCase):
         interface.name = "test"
         interface.fragments = {}
         interface.fragments_lock = threading.Lock()
-        interface.payload_size = 233
+        interface.payload_size = 200
         interface.reassembly_timeout = 30
         interface.max_reassemblies = 4
         interface.max_reassemblies_per_sender = 2

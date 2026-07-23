@@ -788,10 +788,10 @@ The Meshtastic interface uses the official `meshtastic` Python library directly.
 Install Reticulum with the optional dependency: `pip install "rns[meshtastic]"`.
 
 RNS packets are sent as binary Meshtastic data on `RETICULUM_TUNNEL_APP`, not as
-text messages. The interface fragments only packets larger than Meshtastic's
-233-byte application payload limit. Its versioned `RNSM` framing includes a
-random transfer ID, fragment count and whole-packet CRC. Reassembly is isolated
-per Meshtastic sender and bounded by time, packet size and concurrent-transfer
+text messages. The interface uses a conservative 200-byte frame limit and
+fragments RNS packets as needed. Its versioned `RNSM` framing includes a random
+transfer ID, fragment count and whole-packet CRC. Reassembly is isolated per
+Meshtastic sender and bounded by time, packet size and concurrent-transfer
 limits. Use a dedicated Meshtastic channel and conservative airtime settings.
 
 ```ini
