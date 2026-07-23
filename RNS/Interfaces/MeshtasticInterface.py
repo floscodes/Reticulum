@@ -94,7 +94,7 @@ class MeshtasticInterface(Interface):
     # BLE/firmware combinations drop frames at that exact boundary. Keeping
     # headroom here is more reliable and matches established tunnel practice.
     DEFAULT_PAYLOAD_SIZE = 200
-    MAX_PAYLOAD_SIZE = 233
+    MAX_PAYLOAD_SIZE = 200
     DEFAULT_REASSEMBLY_TIMEOUT = 300
     DEFAULT_SEND_INTERVAL = 1.0
     DEFAULT_RECONNECT_INTERVAL = 5.0

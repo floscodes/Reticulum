@@ -10,7 +10,18 @@ class MeshtasticFrameCodecTest(unittest.TestCase):
     def test_reticulum_interface_defaults(self):
         self.assertEqual(MeshtasticInterface.DEFAULT_IFAC_SIZE, 8)
         self.assertEqual(MeshtasticInterface.DEFAULT_PAYLOAD_SIZE, 200)
-        self.assertEqual(MeshtasticInterface.MAX_PAYLOAD_SIZE, 233)
+        self.assertEqual(MeshtasticInterface.MAX_PAYLOAD_SIZE, 200)
+
+    def test_payload_size_above_safe_limit_is_rejected(self):
+        interface = self.make_interface()
+        interface.payload_size = 201
+        interface.max_pending_packets = 1
+        interface.send_interval = 0
+        interface.reconnect_interval = 1
+        interface.max_reconnect_interval = 1
+
+        with self.assertRaisesRegex(ValueError, "between 16 and 200"):
+            interface._validate_config()
 
     def test_binary_round_trip_multiframe(self):
         packet = bytes(range(256)) + bytes(range(244))
