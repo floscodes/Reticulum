@@ -3,12 +3,14 @@ Reticulum Network Stack <img align="right" src="https://static.pepy.tech/persona
 
 <p align="center"><img width="200" src="https://raw.githubusercontent.com/markqvist/Reticulum/master/docs/source/graphics/rns_logo_512.png"></p>
 
-> [!IMPORTANT]
-> This repository is an independent, community-maintained fork of
-> [Reticulum](https://github.com/markqvist/Reticulum). Reticulum was created
-> and is primarily developed by Mark Qvist. This fork is not an official
-> Reticulum distribution, and no support or review from the original author
-> is expected.
+## Important
+
+**This repository is an independent, community-maintained fork of
+[Reticulum](https://github.com/markqvist/Reticulum).**
+
+Reticulum was created and is primarily developed by Mark Qvist. This fork is
+not an official Reticulum distribution, and no support or review from the
+original author is expected.
 
 **Additions maintained in this fork**
 
