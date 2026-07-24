@@ -5,7 +5,7 @@ Reticulum Network Stack <img align="right" src="https://static.pepy.tech/persona
 
 ## Important
 
-**This repository is an independent, community-maintained fork of
+**This repository is an independent fork of
 [Reticulum](https://github.com/markqvist/Reticulum).**
 
 Reticulum was created and is primarily developed by Mark Qvist. This fork is
