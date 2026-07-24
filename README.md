@@ -23,11 +23,16 @@ conservative airtime safeguards, and radio reconnect handling.
 
 ### Meshtastic interface configuration
 
-Install Reticulum with the optional Meshtastic dependency:
+Clone and install this fork with the optional Meshtastic dependency:
 
 ```bash
-pip install "rns[meshtastic]"
+git clone https://github.com/floscodes/Reticulum.git
+cd Reticulum
+pip install ".[meshtastic]"
 ```
+
+The `MeshtasticInterface` is included in this repository. The optional
+`meshtastic` extra only installs the required Meshtastic Python library.
 
 Example BLE configuration:
 
