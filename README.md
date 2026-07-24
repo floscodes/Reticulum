@@ -21,6 +21,53 @@ Meshtastic port number 76 and includes bounded binary fragmentation,
 sender-separated reassembly, configurable channel and modem settings,
 conservative airtime safeguards, and radio reconnect handling.
 
+### Meshtastic interface configuration
+
+Install Reticulum with the optional Meshtastic dependency:
+
+```bash
+pip install "rns[meshtastic]"
+```
+
+Example BLE configuration:
+
+```ini
+[[Meshtastic]]
+  type = MeshtasticInterface
+  enabled = yes
+  ble = AA:BB:CC:DD:EE:FF
+  channel = 0
+
+  # Optional settings shown with their defaults:
+  # hop_limit = 1
+  # payload_size = 200
+  # send_interval = 1.0
+  # connection_timeout = 30
+```
+
+- Select one connection method: `ble`, `port` for a serial device, or `host`
+  for a TCP-connected Meshtastic node. If none is specified, serial discovery
+  is attempted.
+- `hop_limit = 0` permits direct-radio delivery only. The default value of `1`
+  permits at most one Meshtastic rebroadcast. Higher values are rejected to
+  prevent this interface from enabling multi-hop flooding.
+- Each Meshtastic frame uses a conservative payload limit of 200 bytes.
+  Larger RNS packets are automatically fragmented and reassembled. The
+  `payload_size` setting can be lowered when required, but cannot exceed 200.
+- `send_interval` controls pacing between fragments in seconds. Its default is
+  `1.0`; setting it to `0` disables pacing.
+- Meshtastic acknowledgements are disabled because Reticulum provides its own
+  reliability mechanisms. `want_ack = yes` is therefore rejected.
+- `channel` defaults to `0`. A dedicated channel from 1 to 7 can be used when
+  it has been provisioned identically on every participating radio.
+- `connection_timeout` controls connection establishment and defaults to 30
+  seconds. An optional `modem_preset` can also be configured, but all
+  communicating radios must use compatible radio settings.
+
+See the
+[`MeshtasticInterface` documentation](./docs/markdown/interfaces.md#meshtastic-interface)
+for the complete configuration reference and operational guidance.
+
 To understand the foundational philosophy and goals of this system, read the [Zen of Reticulum](Zen%20of%20Reticulum.md).
 
 Reticulum is the cryptography-based networking stack for building local and wide-area
