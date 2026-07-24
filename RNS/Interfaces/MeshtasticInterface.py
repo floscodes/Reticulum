@@ -28,7 +28,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-"""Reticulum transport over Meshtastic's native binary data API."""
+"""Reticulum transport over Meshtastic port 76, reserved for Reticulum."""
 
 import binascii
 import os
