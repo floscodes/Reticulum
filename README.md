@@ -44,6 +44,7 @@ Example BLE configuration:
   channel = 0
 
   # Optional settings shown with their defaults:
+  # modem_preset = LongFast
   # hop_limit = 1
   # payload_size = 200
   # send_interval = 1.0
