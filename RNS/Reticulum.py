@@ -262,11 +262,15 @@ class Reticulum:
         Reticulum.__discovery_enabled                 = False
         Reticulum.__discover_interfaces               = False
         Reticulum.__autoconnect_discovered_interfaces = False
+        Reticulum.__autoconnect_interface_mode        = None
+        Reticulum.__autoconnect_interface_gravity     = None
+        Reticulum.__autoconnect_announces_to_internal = None
         Reticulum.__required_discovery_value          = None
         Reticulum.__publish_blackhole                 = False
         Reticulum.__blackhole_update_interval         = RNS.Discovery.BlackholeUpdater.UPDATE_INTERVAL
         Reticulum.__blackhole_sources                 = []
         Reticulum.__interface_sources                 = []
+        Reticulum.__default_gravity                   = None
         Reticulum.__default_ar_target                 = None
         Reticulum.__default_ar_penalty                = None
         Reticulum.__default_ar_grace                  = None
@@ -456,7 +460,7 @@ class Reticulum:
                     RNS.loglevel = int(value)
                     if self.requested_verbosity != None: RNS.loglevel += self.requested_verbosity
                     if RNS.loglevel < 0:                 RNS.loglevel = 0
-                    if RNS.loglevel > 7:                 RNS.loglevel = 7
+                    if RNS.loglevel > 8:                 RNS.loglevel = 8
                 elif option == "logtimestamps":
                     value = self.config["logging"].as_bool(option)
                     RNS.logtimestamps = bool(value)
@@ -567,6 +571,10 @@ class Reticulum:
                     if v == True:  Reticulum.__use_implicit_proof = True
                     if v == False: Reticulum.__use_implicit_proof = False
                 
+                if option == "default_gravity":
+                    v = self.config["reticulum"].as_int(option)
+                    Reticulum.__default_gravity = v
+
                 if option == "discover_interfaces":
                     v = self.config["reticulum"].as_bool(option)
                     if v == True:  Reticulum.__discover_interfaces = True
@@ -604,11 +612,34 @@ class Reticulum:
                         try: source_identity_hash = bytes.fromhex(hexhash)
                         except Exception as e: raise ValueError(f"Invalid identity hash for interface discovery source: {hexhash}")
                         if not source_identity_hash in Reticulum.__interface_sources: Reticulum.__interface_sources.append(source_identity_hash)
-                
+
                 if option == "autoconnect_discovered_interfaces":
                     v = self.config["reticulum"].as_int(option)
                     if v > 0: Reticulum.__autoconnect_discovered_interfaces = v
-                
+
+                if option == "autoconnect_interface_mode":
+                    v = None; dmode = str(self.config["reticulum"]["autoconnect_interface_mode"]).lower()
+                    if   dmode == "full":         v = Interface.Interface.MODE_FULL
+                    elif dmode == "access_point": v = Interface.Interface.MODE_ACCESS_POINT
+                    elif dmode == "accesspoint":  v = Interface.Interface.MODE_ACCESS_POINT
+                    elif dmode == "ap":           v = Interface.Interface.MODE_ACCESS_POINT
+                    elif dmode == "pointtopoint": v = Interface.Interface.MODE_POINT_TO_POINT
+                    elif dmode == "ptp":          v = Interface.Interface.MODE_POINT_TO_POINT
+                    elif dmode == "roaming":      v = Interface.Interface.MODE_ROAMING
+                    elif dmode == "boundary":     v = Interface.Interface.MODE_BOUNDARY
+                    elif dmode == "gateway":      v = Interface.Interface.MODE_GATEWAY
+                    elif dmode == "gw":           v = Interface.Interface.MODE_GATEWAY
+                    elif dmode == "internal":     v = Interface.Interface.MODE_INTERNAL
+                    if v != None: Reticulum.__autoconnect_interface_mode = v
+
+                if option == "autoconnect_interface_gravity":
+                    v = self.config["reticulum"].as_int(option)
+                    Reticulum.__autoconnect_interface_gravity = v
+
+                if option == "autoconnect_announces_to_internal":
+                    v = self.config["reticulum"].as_bool(option)
+                    if v > 0: Reticulum.__autoconnect_announces_to_internal = v
+
                 if option == "default_ar_target":
                     v = self.config["reticulum"].as_int(option)
                     if   v == 0: Reticulum.__default_ar_target = None
@@ -738,6 +769,9 @@ class Reticulum:
             elif c["mode"] == "internal":
                 interface_mode = Interface.Interface.MODE_INTERNAL
 
+        gravity = self._default_gravity()
+        if "gravity" in c: gravity = c.as_int("gravity")
+
         ifac_size = None
         if "ifac_size" in c:
             if c.as_int("ifac_size") >= Reticulum.IFAC_MIN_SIZE*8: ifac_size = c.as_int("ifac_size")//8
@@ -812,6 +846,9 @@ class Reticulum:
         announces_from_internal = True
         if "announces_from_internal" in c: announces_from_internal = c.as_bool("announces_from_internal")
 
+        announces_to_internal = None
+        if "announces_to_internal" in c: announces_to_internal = c.as_bool("announces_to_internal")
+
         ignore_config_warnings = False
         if "ignore_config_warnings" in c: ignore_config_warnings = c.as_bool("ignore_config_warnings")
 
@@ -872,6 +909,7 @@ class Reticulum:
                     else:                                                  interface.OUT = True
 
                     interface.mode = interface_mode
+                    interface.gravity = gravity
                     interface.announce_cap = announce_cap
                     interface.bootstrap_only = bootstrap_only
                     if configured_bitrate: interface.bitrate = configured_bitrate
@@ -897,6 +935,7 @@ class Reticulum:
 
                     interface.recursive_prs                   = recursive_prs
                     interface.announces_from_internal         = announces_from_internal
+                    interface.announces_to_internal           = announces_to_internal
                     interface.announce_rate_target            = announce_rate_target
                     interface.announce_rate_grace             = announce_rate_grace
                     interface.announce_rate_penalty           = announce_rate_penalty
@@ -1055,15 +1094,17 @@ class Reticulum:
             RNS.trace_exception(e)
             RNS.panic()
 
-    def _add_interface(self, interface, mode = None, configured_bitrate=None, ifac_size=None, ifac_netname=None, ifac_netkey=None,
+    def _add_interface(self, interface, mode=None, gravity=None, configured_bitrate=None, ifac_size=None, ifac_netname=None, ifac_netkey=None,
                        announce_cap=None, announce_rate_target=None, announce_rate_grace=None, announce_rate_penalty=None,
-                       bootstrap_only=False, recursive_prs=False, announces_from_internal=True):
+                       bootstrap_only=False, recursive_prs=False, announces_from_internal=True, announces_to_internal=None):
 
         if not self.is_connected_to_shared_instance:
             if interface != None and issubclass(type(interface), RNS.Interfaces.Interface.Interface):
                 
-                if mode == None: mode = Interface.Interface.MODE_FULL
+                if mode == None:    mode = Interface.Interface.MODE_FULL
+                if gravity == None: gravity = self._default_gravity()
                 interface.mode = mode
+                interface.gravity = gravity
                 interface.OUT  = True
 
                 if configured_bitrate: interface.bitrate = configured_bitrate
@@ -1075,6 +1116,7 @@ class Reticulum:
 
                 interface.recursive_prs           = recursive_prs
                 interface.announces_from_internal = announces_from_internal
+                interface.announces_to_internal   = announces_to_internal
                 interface.announce_cap            = announce_cap if announce_cap != None else Reticulum.ANNOUNCE_CAP/100.0
                 interface.announce_rate_target    = announce_rate_target
                 interface.announce_rate_grace     = announce_rate_grace
@@ -1101,6 +1143,9 @@ class Reticulum:
 
                 RNS.Transport.add_interface(interface)
                 interface.final_init()
+
+    def _default_gravity(self):
+        return self.__default_gravity or RNS.Interfaces.Interface.Interface.DEFAULT_GRAVITY
 
     def _default_ar_target(self):
         return self.__default_ar_target or RNS.Interfaces.Interface.Interface.DEFAULT_AR_TARGET
@@ -1446,6 +1491,8 @@ class Reticulum:
                 ifstats["pr_burst_activated"]          = interface.ic_pr_burst_activated
                 ifstats["status"]                      = interface.online
                 ifstats["mode"]                        = interface.mode
+                ifstats["gravity"]                     = interface.gravity
+                ifstats["announces_to_internal"]       = interface.announces_to_internal
 
                 interfaces.append(ifstats)
 
@@ -1806,6 +1853,18 @@ class Reticulum:
     @staticmethod
     def should_autoconnect_discovered_interfaces():
         return Reticulum.__autoconnect_discovered_interfaces > 0
+
+    @staticmethod
+    def autoconnect_interface_mode():
+        return Reticulum.__autoconnect_interface_mode
+
+    @staticmethod
+    def autoconnect_interface_gravity():
+        return Reticulum.__autoconnect_interface_gravity
+
+    @staticmethod
+    def autoconnect_announces_to_internal():
+        return Reticulum.__autoconnect_announces_to_internal
 
     @staticmethod
     def max_autoconnected_interfaces():

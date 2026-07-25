@@ -52,7 +52,8 @@ class Interface:
 
     # Which interface modes a Transport Node should
     # actively discover paths for.
-    DISCOVER_PATHS_FOR  = [MODE_ACCESS_POINT, MODE_GATEWAY, MODE_ROAMING, MODE_INTERNAL]
+    DISCOVER_PATHS_FOR    = [MODE_ACCESS_POINT, MODE_GATEWAY, MODE_ROAMING, MODE_INTERNAL]
+    BOUNDARY_SEARCH_MODES = [MODE_BOUNDARY, MODE_GATEWAY]
 
     # How many samples to use for announce
     # frequency calculations
@@ -70,9 +71,8 @@ class Interface:
     # to hold at any given time.
     MAX_HELD_ANNOUNCES  = 256
 
-    # How long a spawned interface will be
-    # considered to be newly created. Two
-    # hours by default.
+    # Control parameters
+    DEFAULT_GRAVITY          = 0
     IC_NEW_TIME              = 2*60*60
     IC_BURST_FREQ_NEW        = 3
     IC_BURST_FREQ            = 10
@@ -97,6 +97,7 @@ class Interface:
     def __init__(self):
         self.rxb      = 0
         self.txb      = 0
+        self.gravity  = 0
         self.created  = time.time()
         self.detached = False
         self.online   = False
@@ -110,6 +111,7 @@ class Interface:
         self.bootstrap_only           = False
         self.recursive_prs            = False
         self.announces_from_internal  = True
+        self.announces_to_internal    = None
         self.parent_interface         = None
         self.spawned_interfaces       = None
         self.tunnel_id                = None
@@ -154,7 +156,7 @@ class Interface:
 
             if self.ic_burst_active:
                 if ia_freq < freq_threshold and time.time() > self.ic_burst_activated+self.ic_burst_hold:
-                    if len(self.ia_freq_deque) >= self.IC_BURST_MIN_SAMPLES: self.ic_burst_active = False
+                    if len(self.ia_freq_deque) >= self.IC_DEQUE_MIN_SAMPLE: self.ic_burst_active = False
 
                 return True
 

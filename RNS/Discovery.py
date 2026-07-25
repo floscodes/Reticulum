@@ -331,7 +331,7 @@ class InterfaceAnnounceHandler:
                         if IFAC_NETKEY  in unpacked: info["ifac_netkey"]  = str(unpacked[IFAC_NETKEY])
 
                         if interface_type in ["BackboneInterface", "TCPServerInterface"]:
-                            backbone_support     = not RNS.vendor.platformutils.is_windows()
+                            backbone_support     = not RNS.vendor.platformutils.is_windows() and not RNS.vendor.platformutils.is_darwin()
                             info["reachable_on"] = unpacked[REACHABLE_ON]
                             info["port"]         = unpacked[PORT]
                             connection_interface = "BackboneInterface" if backbone_support else "TCPClientInterface"
@@ -430,6 +430,9 @@ class InterfaceDiscovery():
     AUTOCONNECT_TYPES  = ["BackboneInterface", "TCPServerInterface"]
     DISCOVERABLE_TYPES = ["BackboneInterface", "TCPServerInterface", "I2PInterface", "RNodeInterface", "WeaveInterface", "KISSInterface"]
 
+    AC_TRANSPORT_MODE  = RNS.Interfaces.Interface.Interface.MODE_GATEWAY
+    AC_GRAVITY         = 0
+
     discovery_lock     = Lock()
 
     def __init__(self, required_value=InterfaceAnnouncer.DEFAULT_STAMP_VALUE, callback=None, discover_interfaces=True):
@@ -464,13 +467,17 @@ class InterfaceDiscovery():
                     with open(filepath, "rb") as f: info = msgpack.unpackb(f.read())
 
                 should_remove = False
-                heard_delta = now-info["last_heard"]
-                info["name"] = InterfaceAnnounceHandler.sanitize_name(info["name"])
+                heard_delta   = now-info["last_heard"]
+                info["name"]  = InterfaceAnnounceHandler.sanitize_name(info["name"])
                 
-                if heard_delta > self.THRESHOLD_REMOVE: should_remove = True
+                if   heard_delta > self.THRESHOLD_REMOVE: should_remove = True
+                elif not "transport_id" in info or not info["transport_id"]: should_remove = True
+                elif not "network_id" in info or not info["network_id"]: should_remove = True
                 elif discovery_sources and not "network_id" in info: should_remove = True
                 elif discovery_sources and not bytes.fromhex(info["network_id"]) in discovery_sources: should_remove = True
                 elif not "type" in info or ("type" in info and not info["type"] in self.DISCOVERABLE_TYPES): should_remove = True
+                elif self.rns_instance.is_blackholed(bytes.fromhex(info["network_id"])): should_remove = True
+                elif self.rns_instance.is_blackholed(bytes.fromhex(info["transport_id"])): should_remove = True
                 elif "reachable_on" in info:
                     if not (is_ip_address(info["reachable_on"]) or is_hostname(info["reachable_on"])): should_remove = True
 
@@ -722,12 +729,16 @@ class InterfaceDiscovery():
                                 RNS.log(f"Auto-connecting discovered {interface_type} {interface_name}")
                                 interface.autoconnect_hash = endpoint_hash
                                 interface.autoconnect_source = info["network_id"]
-                                mode = RNS.Interfaces.Interface.Interface.MODE_GATEWAY if RNS.Reticulum.transport_enabled() else None
+                                if RNS.Reticulum.autoconnect_interface_mode(): mode = RNS.Reticulum.autoconnect_interface_mode()
+                                else: mode = self.AC_TRANSPORT_MODE if RNS.Reticulum.transport_enabled() else None
+                                internal_a = True if RNS.Reticulum.autoconnect_announces_to_internal() else None
+                                gravity    = RNS.Reticulum.autoconnect_interface_gravity() or self.AC_GRAVITY
                                 ar_target  = RNS.Reticulum.get_instance()._default_ar_target() if RNS.Reticulum.transport_enabled() else None
                                 ar_penalty = RNS.Reticulum.get_instance()._default_ar_penalty() if RNS.Reticulum.transport_enabled() else None
                                 ar_grace   = RNS.Reticulum.get_instance()._default_ar_grace() if RNS.Reticulum.transport_enabled() else None
                                 RNS.Reticulum.get_instance()._add_interface(interface, mode=mode, ifac_netname=ifac_netname, ifac_netkey=ifac_netkey, configured_bitrate=5E6,
-                                                                            announce_rate_target=ar_target, announce_rate_grace=ar_grace, announce_rate_penalty=ar_penalty)
+                                                                            announce_rate_target=ar_target, announce_rate_grace=ar_grace, announce_rate_penalty=ar_penalty,
+                                                                            announces_to_internal=internal_a, gravity=gravity)
                                 self.monitor_interface(interface)
 
         except Exception as e:
