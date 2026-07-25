@@ -571,6 +571,14 @@ if __name__ == "__main__":
         )
 
         parser.add_argument(
+            "--timeout",
+            action="store",
+            default=APP_TIMEOUT,
+            help="seconds to wait for file lists and download start (default: 45)",
+            type=float
+        )
+
+        parser.add_argument(
             "destination",
             nargs="?",
             default=None,
@@ -579,6 +587,11 @@ if __name__ == "__main__":
         )
 
         args = parser.parse_args()
+
+        if args.timeout <= 0:
+            parser.error("--timeout must be greater than zero")
+
+        APP_TIMEOUT = args.timeout
 
         if args.config:
             configarg = args.config
