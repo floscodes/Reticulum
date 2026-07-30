@@ -31,6 +31,11 @@ cd Reticulum
 pip install ".[meshtastic]"
 ```
 
+If you already have Reticulum installed, you can also add the interface by
+copying
+[`MeshtasticInterface.py`](https://github.com/floscodes/RNS_MeshtasticInterface/blob/main/MeshtasticInterface.py)
+into your `~/.reticulum/interfaces` folder.
+
 The `MeshtasticInterface` is included in this repository. The optional
 `meshtastic` extra only installs the required Meshtastic Python library.
 
